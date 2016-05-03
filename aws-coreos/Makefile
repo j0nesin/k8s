@@ -37,9 +37,6 @@ init: clean
 	# render AWS cloudformation config for inspection (optional)
 	./darwin-amd64/kube-aws up --export
 
-clean:
-	rm -rf credentials userdata cluster.yaml kubeconfig *stack-template.json
-
 validate:
 	./darwin-amd64/kube-aws validate
 
@@ -53,6 +50,7 @@ create:
 # destroy the AWS environment
 destroy:
 	./darwin-amd64/kube-aws destroy
+	rm -rf credentials userdata cluster.yaml kubeconfig *stack-template.json
 
 # get the cluster controller externl ip for the created stack.  Needs to alias to the external-dns-name.
 cluster-ip:
