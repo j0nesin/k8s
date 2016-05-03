@@ -1,0 +1,5 @@
+.vagrant
+config.rb
+ssl/
+kubernetes
+coreos-kubernetes

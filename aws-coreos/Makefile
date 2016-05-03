@@ -1,3 +1,5 @@
+# Deploy Kubernetes cluster base on CoreOS install instructions
+
 # The env variables must be defined externally
 
 # AWS_KEYPAIR=<keypair-name>
