@@ -1,5 +1,6 @@
 env.sh
 darwin-amd64
+linux-amd64
 userdata
 cluster.yaml
 *stack-template.json
