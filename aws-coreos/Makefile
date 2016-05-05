@@ -63,6 +63,11 @@ init:
 	@echo "			content: |"
 	@echo "				dummy file to generate directory /var/log/containers"
 	@echo ""
+	@echo "WARNING : Required step to use Influxdb-Grafana Monitoring add-on"
+	@echo "The default Heapster definition must be removed.  It will be replaced when the add-on is deployed."
+	@echo "1.) Remove the section in userdata/cloud-config-controller that begins with:"
+	@echo "    - path: /srv/kubernetes/manifests/heapster-dc.json"
+	@echo ""
 
 validate:
 	./$(PLATFORM)/kube-aws validate
@@ -97,6 +102,8 @@ test:
 # destroy the AWS environment
 destroy:
 	./$(PLATFORM)/kube-aws destroy
+
+clean:
 	rm -rf credentials userdata cluster.yaml kubeconfig *stack-template.json
 
 ####### Add-Ons #######
@@ -110,21 +117,18 @@ update-k8s-src:
 	cd $(K8S_SRC) && git pull
 
 dashboard: kubeconfig
-	kubectl create -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-controller.yaml
-	kubectl create -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-service.yaml
+	# deploy all the RCs and SVCs in the add-on directory
+	kubectl create -f $(K8S_SRC)/cluster/addons/dashboard/
 	@echo ""
 	@echo "Access dashboard at http://localhost:$(PROXY_PORT)/ui"
 	@echo ""
 
 delete-dashboard: kubeconfig
-	kubectl delete -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-controller.yaml
-	kubectl delete -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-service.yaml
+	kubectl delete --ignore-not-found -f $(K8S_SRC)/cluster/addons/dashboard/
 
 es-logging:
-	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-controller.yaml
-	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-service.yaml
-	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-controller.yaml
-	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-service.yaml
+	# deploy all the RCs and SVCs in the add-on directory
+	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/
 	# need fluentd-elasticsearch container to run on all nodes.  Two options for this:
 	# - Copy $(K8S_SRC)/cluster/saltbase/salt/fluentd-es/fluentd-es.yaml to /etc/kubernetes/manifests on all machines
 	# - Deploy container as daemon-set pod using custom file.  Keep custom file versions updated with K8S src file listed above
@@ -136,10 +140,17 @@ es-logging:
 	@echo ""
 	@echo "Kibana : http://localhost:$(PROXY_PORT)/api/v1/proxy/namespaces/kube-system/services/kibana-logging/"
 	@echo "You will be presented with a page that asks you to configure your view of the ingested logs. Select the option for timeseries values and select @timestamp. On the following page select the Discover tab and then you should be able to see the ingested logs."
+	@echo ""
 
 delete-es-logging:
-	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-controller.yaml
-	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-service.yaml
-	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-controller.yaml
-	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-service.yaml
-	kubectl delete -f ./fluentd-es-daemonset.yaml
+	kubectl delete --ignore-not-found -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/
+	kubectl delete --ignore-not-found -f ./fluentd-es-daemonset.yaml
+
+influxdb-monitoring:
+	# deploy all the RCs and SVCs in the add-on directory
+	# WARNING : The heapster rc yaml has salt scripting that must be removed.
+	kubectl create -f $(K8S_SRC)/cluster/addons/cluster-monitoring/influxdb/
+	@echo "Grafana : http://localhost:$(PROXY_PORT)/api/v1/proxy/namespaces/kube-system/services/monitoring-grafana/"
+
+delete-influxdb-monitoring:
+	kubectl delete --ignore-not-found -f $(K8S_SRC)/cluster/addons/cluster-monitoring/influxdb/
