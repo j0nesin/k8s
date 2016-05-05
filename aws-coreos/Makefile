@@ -14,6 +14,7 @@
 KUBE_AWS_VERSION ?= 0.6.1
 PLATFORM ?= linux-amd64
 #PLATFORM ?= darwin-amd64
+PROXY_PORT ?= 8011
 
 .PHONY:	kubeconfig dashboard-add-on
 
@@ -50,6 +51,18 @@ init:
 	./$(PLATFORM)/kube-aws render
 	# render AWS cloudformation config for inspection (optional)
 	./$(PLATFORM)/kube-aws up --export
+	@echo ""
+	@echo "WARNING : Required steps to use ES Logging add-on :"
+	@echo "CoreOS has a bug that prevents fluentd from accessing the logs on each node."
+	@echo "See https://github.com/coreos/coreos-kubernetes/issues/322 for issue details."
+	@echo "Modify the cloud-config files generated in /userdata as follows to resolve the issue:"
+	@echo "1.) Update the RKT_OPS line in each file to include the following parameters:"
+	@echo "		--volume container,kind=host,source=/var/log/containers,readOnly=false --mount volume=container,target=/var/log/containers"
+	@echo "2.) Add the following section under write_files:"
+	@echo "  - path: /var/log/containers/dummy.txt"
+	@echo "			content: |"
+	@echo "				dummy file to generate directory /var/log/containers"
+	@echo ""
 
 validate:
 	./$(PLATFORM)/kube-aws validate
@@ -58,24 +71,75 @@ validate:
 create:
 	./$(PLATFORM)/kube-aws up
 	@echo ""
-	@echo "You need to map the Kube Controller IP address to the DNS name $(K8S_CLUSTER_NAME) in /etc/hosts or in your DNS provider as an alias"
+	@echo "You need to map the Kube Controller IP address to the DNS name '$(K8S_CLUSTER_DNS)' in /etc/hosts or in your DNS provider as an alias"
+	@echo ""
+	@echo "ssh to boxes as core@<ipaddress> or core@$(K8S_CLUSTER_DNS)"
 	@echo ""
 
-# set the kube config parameters for this cluster and set it to current default
+# get the cluster controller externl ip for the created stack.  Needs to alias to the external-dns-name.
+cluster-ip:
+	aws ec2 describe-instances --filters "Name=tag:Name,Values=kube-aws-controller" | grep PublicIpAddress
+
+# add the kube config parameters for this cluster to the global configs and set it to active context
 kubeconfig:
 	kubectl config set-cluster $(K8S_CLUSTER_NAME) --server=https://$(K8S_CLUSTER_DNS) --certificate-authority=$(PWD)/credentials/ca.pem
 	kubectl config set-credentials $(K8S_CLUSTER_NAME) --certificate-authority=$(PWD)/credentials/ca.pem --client-key=$(PWD)/credentials/admin-key.pem --client-certificate=$(PWD)/credentials/admin.pem
 	kubectl config set-context $(K8S_CLUSTER_NAME) --cluster=$(K8S_CLUSTER_NAME) --user=$(K8S_CLUSTER_NAME)
 	kubectl config use-context $(K8S_CLUSTER_NAME)
 
+proxy: kubeconfig
+	kubectl proxy --port $(PROXY_PORT)
+	@echo "Proxy created at http://localhost:$(PROXY_PORT)"
+
+test:
+	kubectl --kubeconfig=kubeconfig get nodes
+
 # destroy the AWS environment
 destroy:
 	./$(PLATFORM)/kube-aws destroy
 	rm -rf credentials userdata cluster.yaml kubeconfig *stack-template.json
 
-# get the cluster controller externl ip for the created stack.  Needs to alias to the external-dns-name.
-cluster-ip:
-	aws ec2 describe-instances --filters "Name=tag:Name,Values=kube-aws-controller" | grep PublicIpAddress
+####### Add-Ons #######
 
-test:
-	kubectl --kubeconfig=kubeconfig get nodes
+# get kubeernetes src to launch add-ons
+K8S_SRC = ./kubernetes
+k8s-src:
+	git clone --depth 1 https://github.com/kubernetes/kubernetes.git
+# update src
+update-k8s-src:
+	cd $(K8S_SRC) && git pull
+
+dashboard: kubeconfig
+	kubectl create -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-controller.yaml
+	kubectl create -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-service.yaml
+	@echo ""
+	@echo "Access dashboard at http://localhost:$(PROXY_PORT)/ui"
+	@echo ""
+
+delete-dashboard: kubeconfig
+	kubectl delete -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-controller.yaml
+	kubectl delete -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-service.yaml
+
+es-logging:
+	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-controller.yaml
+	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-service.yaml
+	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-controller.yaml
+	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-service.yaml
+	# need fluentd-elasticsearch container to run on all nodes.  Two options for this:
+	# - Copy $(K8S_SRC)/cluster/saltbase/salt/fluentd-es/fluentd-es.yaml to /etc/kubernetes/manifests on all machines
+	# - Deploy container as daemon-set pod using custom file.  Keep custom file versions updated with K8S src file listed above
+	# Here are are doing the latter
+	kubectl create -f ./fluentd-es-daemonset.yaml
+	@echo ""
+	@echo "Test ES : http://localhost:$(PROXY_PORT)/api/v1/proxy/namespaces/kube-system/services/elasticsearch-logging/_cat/indices?v"
+	@echo "Test ES : http://localhost:$(PROXY_PORT)/api/v1/proxy/namespaces/kube-system/services/elasticsearch-logging/_search?pretty=true"
+	@echo ""
+	@echo "Kibana : http://localhost:$(PROXY_PORT)/api/v1/proxy/namespaces/kube-system/services/kibana-logging/"
+	@echo "You will be presented with a page that asks you to configure your view of the ingested logs. Select the option for timeseries values and select @timestamp. On the following page select the Discover tab and then you should be able to see the ingested logs."
+
+delete-es-logging:
+	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-controller.yaml
+	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-service.yaml
+	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-controller.yaml
+	kubectl delete -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-service.yaml
+	kubectl delete -f ./fluentd-es-daemonset.yaml

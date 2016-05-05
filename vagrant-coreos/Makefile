@@ -47,19 +47,21 @@ delete-dashboard-add-on:
 	kubectl delete -f $(K8S_SRC)/cluster/addons/dashboard/dashboard-service.yaml
 
 elk-add-on:
-	# CoreOS has a bug that prevents logging from working.  The following mods are needed:
-	# See https://github.com/coreos/coreos-kubernetes/issues/322 for issue details
-	# - Add the following line to the kubelet wrapper startup configuration at /etc/systemd/system/kubelet.service
-	# - Environment="RKT_OPTS=--volume container,kind=host,source=/var/log/containers,readOnly=false --mount volume=container,target=/var/log/containers"
-	# - mkdir /etc/log/containers
-	# - chmod 755 /etc/log/containers
 	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-controller.yaml
 	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/es-service.yaml
 	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-controller.yaml
 	kubectl create -f $(K8S_SRC)/cluster/addons/fluentd-elasticsearch/kibana-service.yaml
+	# CoreOS has a bug that prevents fluentd from working.  The following mods are needed:
+	# See https://github.com/coreos/coreos-kubernetes/issues/322 for issue details
+	# - Add the following values to the kubelet wrapper startup configuration at /etc/systemd/system/kubelet.service on each node
+	# - Environment="RKT_OPTS=--volume container,kind=host,source=/var/log/containers,readOnly=false --mount volume=container,target=/var/log/containers"
+	# - mkdir /var/log/containers
+	# - chmod 755 /var/log/containers
+	# - restart kubelet service
 	# need fluentd-elasticsearch container to run on all nodes.  Two options for this:
 	# - Copy $(K8S_SRC)/cluster/saltbase/salt/fluentd-es/fluentd-es.yaml to /etc/kubernetes/manifests on all machines
 	# - Deploy container as daemon-set pod using custom file.  Keep custom file versions updated with K8S src file listed above
+	# Here are are doing the latter
 	kubectl create -f ./fluentd-es-daemonset.yaml
 
 delete-elk-add-on:

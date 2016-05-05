@@ -5,3 +5,4 @@ userdata
 cluster.yaml
 *stack-template.json
 kubeconfig
+kubernetes
